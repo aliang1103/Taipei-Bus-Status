@@ -18,6 +18,8 @@ namespace bustest {
         public class route {
             public int Id { get; set; }
             public string nameZh { get; set; }
+            public string departureZh { get; set; }
+            public string destinationZh { get; set; }
         }
 
         public class Stop {

@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -9,16 +11,19 @@ using System.Security;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using static bustest.Program;
 
 namespace bustest {
     public partial class Form1 : Form {
         private readonly HttpClient client = new HttpClient();
-        private bool isload = false;
+        private bool hasload = false;
+        private bool issel = false;
+        private int time=0;
         public Form1() {
             InitializeComponent();
+            panel1.Hide();
             getdata();
+            timevalue();
         }
 
         private Dictionary<int, string> goback = new Dictionary<int, string> {
@@ -27,57 +32,102 @@ namespace bustest {
             {2,"尚未發車" },
             {3,"末班已駛離" },
         };
+        private Dictionary<int, string> times = new Dictionary<int, string>
+        {
+            {-1,"尚未發車" },
+            {-2,"交管不停靠" },
+            {-3,"末班車已過" },
+            {-4,"今日未營運" }
+        };
+        private Dictionary<int,string> route = new Dictionary<int, string>();
+        private Dictionary<int, string> stop = new Dictionary<int, string>();
 
-        private void load() {
-            if (!isload) {
-                MessageBox.Show("資料未載入完成，請稍後再試");
-                return;
+        private void load()
+        {
+            if (!hasload)
+            {
+                var data = Program.routes.GroupBy(x => x.Id).Select(x => new
+                {
+                    id = x.Key,
+                    name = x.First().nameZh
+                }).OrderBy(x=>x.name).ToList();
+                data.Insert(0, new { id = 0, name = "全部" });
+                comboBox2.DataSource = data;
+                comboBox2.DisplayMember = "name";
+                comboBox2.ValueMember = "id";
+                comboBox2.SelectedIndex = 0;
+                hasload = true;
             }
-            var route = Program.routes.GroupBy(x=>x.Id).ToDictionary(x => x.Key, x => x.First().nameZh);
-            var stop = Program.stops.GroupBy(x=>x.Id).ToDictionary(x => x.Key, x => x.First().nameZh);
+            todatagridview();
+            panel1.Show();
+            time = 0;
+        }
+
+        private int first = 0;
+
+        private void todatagridview()
+        {
+            if (dataGridView1.FirstDisplayedScrollingRowIndex >= 0)
+            {
+                first = dataGridView1.FirstDisplayedScrollingRowIndex;
+            }
             DataTable dt = new DataTable();
-            dt.Columns.Add("RouteNumber");
-            dt.Columns.Add("StopId");
-            dt.Columns.Add("EstimateTime");
-            dt.Columns.Add("GoBack");
+            dt.Columns.Add("路線");
+            dt.Columns.Add("站牌");
+            dt.Columns.Add("預估時間");
+            dt.Columns.Add("往返");
             dt.BeginLoadData();
-            foreach (var o in Program.busdata) {
-                string time;
-                int times = int.Parse(o.EstimateTime);
-                switch (times) {
-                    case -1:
-                        time = "尚未發車";
-                        break;
-                    case -2:
-                        time = "交管不停靠";
-                        break;
-                    case -3:
-                        time = "末班車已過";
-                        break;
-                    case -4:
-                        time = "今日未營運";
-                        break;
-                    default:
-                        if (times < 60) {
-                            time = "即將抵達";
-                        }
-                        else time = $"{times / 60}分";
-                        break;
+            var data = Program.busdata.Where(x => (comboBox2.SelectedIndex == 0 || x.RouteId == (int)comboBox2.SelectedValue)).OrderBy(x=>x.GoBack).ToList();
+            Console.WriteLine(data.First().GoBack);
+            foreach (var o in data)
+            {
+                string time="";
+                int timedata = int.Parse(o.EstimateTime);
+                if (timedata >= 0)
+                {
+                    if (timedata == 0)
+                    {
+                        time = "抵達";
+                    }
+                    else
+                    {
+                        var mm = (timedata / 60).ToString("D2");
+                        var ss = (timedata % 60).ToString("D2");
+                        time = $"{mm}:{ss}";
+                    }
                 }
+                var x = int.Parse(o.GoBack);
+                times.TryGetValue(timedata, out string timevalue);
                 route.TryGetValue(o.RouteId, out string routes);
                 stop.TryGetValue(o.StopId, out string stops);
-                goback.TryGetValue(int.Parse(o.GoBack), out string gobacks);
-                dt.Rows.Add(routes ?? "無資料", stops ?? "無資料", time, gobacks ?? "未知");
+                goback.TryGetValue(x, out string gobacks);
+                if (x == 0) gobacks = $"往{Program.routes.Where(y => y.Id == o.RouteId).First().destinationZh}";
+                else if (x == 1) gobacks = $"往{Program.routes.Where(y => y.Id == o.RouteId).First().departureZh}"
+                ;
+                dt.Rows.Add(routes ?? "N/A", stops ?? "N/A", timevalue ?? time, gobacks ?? "N/A");
             }
             dt.EndLoadData();
             dataGridView1.DataSource = dt;
-            var dv = (DataTable)dataGridView1.DataSource;
-            dv.DefaultView.RowFilter = $"RouteNumber LIKE '%{textBox1.Text}%'";
+            if (first < dt.Rows.Count)
+            {
+                dataGridView1.FirstDisplayedScrollingRowIndex = first;
+            }
+            else
+            {
+                dataGridView1.FirstDisplayedScrollingRowIndex = 0;
+            }
+            dataGridView1.Columns[3].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            dataGridView1.Show();
         }
 
-        private void sreach() {
-            var dv = (DataTable)dataGridView1.DataSource;
-            dv.DefaultView.RowFilter = $"RouteNumber LIKE '%{textBox1.Text}%'";
+        private async void timevalue()
+        {
+            while (true)
+            {
+                time++;
+                label2.Text = $"{time}秒前更新";
+                await Task.Delay(1000);
+            }
         }
 
         private async void getdata() {
@@ -108,8 +158,6 @@ namespace bustest {
                             var jo = JObject.Parse(json);
                             Program.stops = jo["BusInfo"].ToObject<List<Program.Stop>>();
                         }
-                        isload = true;
-                        load();
                     }
                     else {
                         MessageBox.Show($"Error Code: {data.StatusCode} {route.StatusCode}");
@@ -118,12 +166,23 @@ namespace bustest {
                 catch (Exception ex) {
                     MessageBox.Show("Error Reason : " + ex.Message);
                 }
+                route = Program.routes.GroupBy(x => x.Id).ToDictionary(x => x.Key, x => x.First().nameZh);
+                stop = Program.stops.GroupBy(x => x.Id).ToDictionary(x => x.Key, x => x.First().nameZh);
+                load();
                 await Task.Delay(10000);
             }
         }
 
-        private void textBox1_TextChanged(object sender, EventArgs e) {
-            sreach();
+        private void comboBox2_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            this.ActiveControl = null;
+            todatagridview();
+        }
+
+        private void comboBox1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            this.ActiveControl = null;
+            todatagridview();
         }
     }
 }
